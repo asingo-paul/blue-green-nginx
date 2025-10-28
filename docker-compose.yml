@@ -1,0 +1,43 @@
+services:
+  app_blue:
+    image: "${BLUE_IMAGE}"             # e.g., ghcr.io/hngprojects/hngx-bluegreen-blue:latest
+    container_name: app_blue
+    environment:
+      - PORT=${PORT:-8080}
+      - RELEASE_ID=${RELEASE_ID_BLUE}
+    ports:
+      - "8081:8080"                    # Host 8081 -> Container 8080
+    restart: always
+
+  app_green:
+    image: "${GREEN_IMAGE}"            # e.g., ghcr.io/hngprojects/hngx-bluegreen-green:latest
+    container_name: app_green
+    environment:
+      - PORT=${PORT:-8080}
+      - RELEASE_ID=${RELEASE_ID_GREEN}
+    ports:
+      - "8082:8080"                    # Host 8082 -> Container 8080
+    restart: always
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: nginx_gateway
+    depends_on:
+      - app_blue
+      - app_green
+    ports:
+      - "8080:80"                      # Public entrypoint
+    environment:
+      - ACTIVE_POOL=${ACTIVE_POOL}
+      - UPSTREAM_BLUE=127.0.0.1:8081
+      - UPSTREAM_GREEN=127.0.0.1:8082
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/docker-entrypoint.sh"]
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3

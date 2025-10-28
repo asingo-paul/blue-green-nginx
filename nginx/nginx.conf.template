@@ -1,0 +1,58 @@
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+
+    keepalive_timeout 5;
+    client_body_timeout 8s;
+    client_header_timeout 8s;
+
+    # Dynamic upstream switching between blue and green
+    upstream backend {
+        # If ACTIVE_POOL=blue, blue is primary; green acts as backup
+        # If ACTIVE_POOL=green, reverse logic applies (re-rendered by entrypoint)
+
+        # Blue primary, green backup
+        server ${UPSTREAM_BLUE} max_fails=1 fail_timeout=2s;
+        server ${UPSTREAM_GREEN} backup;
+    }
+
+    server {
+        listen 80;
+
+        # Proxy settings
+        location / {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            # Tight timeouts for fast failover
+            proxy_connect_timeout 1s;
+            proxy_send_timeout 5s;
+            proxy_read_timeout 6s;
+
+            # Retry behavior on failure
+            proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
+            proxy_next_upstream_timeout 8s;
+        }
+
+        # Health endpoint for Nginx health checks
+        location = /healthz {
+            add_header Content-Type text/plain;
+            return 200 'ok';
+        }
+    }
+}
