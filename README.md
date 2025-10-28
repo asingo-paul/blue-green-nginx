@@ -1,21 +1,12 @@
-# Blue/Green Nginx Upstreams (Auto-Failover + Manual Toggle)
+# Blue/Green Deployment with Nginx Auto-Failover
 
+This repository implements a **Blue/Green deployment** setup with **Nginx failover** between two identical Node.js apps.
 
-This repository implements the Stage 2 DevOps task: run two ready-to-run Nodejs app images (blue & green) behind Nginx using Docker Compose. The Nginx config is templated and tuned for fast failover and in-request retries so clients never receive failures when the active app dies.
+---
 
+## 🚀 How to Run Locally
 
-## Files
-See the repo root for:
-- `docker-compose.yml`
-- `.env.example` (copy to `.env` and fill values as CI/grader will set them)
-- `nginx/` (template + entrypoint)
-- `README.md` (this file)
-- `DECISION.md` (explain decisions)
-- `PART_B_RESEARCH.md` (the research doc you should paste into Google Docs)
-
-
-## How to run locally (manual verification)
-1. Copy the example env:
-```bash
-cp .env.example .env
-# Edit .env if necessary (or let the grader set variables)
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/asingo-paul/blue-green-nginx.git
+   cd blue-green-nginx

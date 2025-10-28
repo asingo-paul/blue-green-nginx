@@ -8,51 +8,85 @@ events {
 }
 
 http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    
     sendfile on;
     tcp_nopush on;
     tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
 
-    keepalive_timeout 5;
-    client_body_timeout 8s;
-    client_header_timeout 8s;
-
-    # Dynamic upstream switching between blue and green
+    # Upstream configuration - Blue active, Green backup
     upstream backend {
-        # If ACTIVE_POOL=blue, blue is primary; green acts as backup
-        # If ACTIVE_POOL=green, reverse logic applies (re-rendered by entrypoint)
-
-        # Blue primary, green backup
-        server ${UPSTREAM_BLUE} max_fails=1 fail_timeout=2s;
+        server ${UPSTREAM_BLUE} max_fails=2 fail_timeout=3s;
         server ${UPSTREAM_GREEN} backup;
     }
 
+    # Log format to track upstream responses
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for" '
+                    '"$upstream_addr" "$upstream_http_x_app_pool" "$upstream_http_x_release_id"';
+
+    access_log /var/log/nginx/access.log main;
+
     server {
         listen 80;
+        server_name localhost;
 
-        # Proxy settings
+        # Health check endpoint for nginx itself
+        location = /healthz {
+            access_log off;
+            add_header Content-Type text/plain;
+            return 200 "healthy\n";
+        }
+
+        # Main proxy configuration
         location / {
+            proxy_pass http://backend;
+            
+            # Preserve client headers
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # Critical: Disable buffering for immediate failover
+            proxy_buffering off;
+            
+            # Tight timeouts for quick failover detection
+            proxy_connect_timeout 2s;
+            proxy_send_timeout 3s;
+            proxy_read_timeout 3s;
+            
+            # Retry configuration - crucial for automatic failover
+            proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
+            proxy_next_upstream_timeout 4s;
+            
+            # Preserve app headers (important for the project requirements)
+            proxy_pass_header X-App-Pool;
+            proxy_pass_header X-Release-Id;
+            
+            # Remove any headers that might interfere
+            proxy_hide_header X-Powered-By;
+        }
+
+        # Chaos endpoints should also go through failover logic
+        location ~ ^/chaos/ {
             proxy_pass http://backend;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-
-            # Tight timeouts for fast failover
-            proxy_connect_timeout 1s;
-            proxy_send_timeout 5s;
-            proxy_read_timeout 6s;
-
-            # Retry behavior on failure
-            proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
-            proxy_next_upstream_tries 2;
-            proxy_next_upstream_timeout 8s;
-        }
-
-        # Health endpoint for Nginx health checks
-        location = /healthz {
-            add_header Content-Type text/plain;
-            return 200 'ok';
+            proxy_connect_timeout 2s;
+            proxy_send_timeout 3s;
+            proxy_read_timeout 3s;
+            proxy_buffering off;
+            
+            # Preserve headers for chaos endpoints too
+            proxy_pass_header X-App-Pool;
+            proxy_pass_header X-Release-Id;
         }
     }
 }

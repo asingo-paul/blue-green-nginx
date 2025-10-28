@@ -1,23 +1,41 @@
 services:
   app_blue:
-    image: "${BLUE_IMAGE}"             # e.g., ghcr.io/hngprojects/hngx-bluegreen-blue:latest
+    image: "${BLUE_IMAGE}"
     container_name: app_blue
     environment:
-      - PORT=${PORT:-8080}
+      - PORT=${PORT}
       - RELEASE_ID=${RELEASE_ID_BLUE}
+      - APP_POOL=blue
+    expose:
+      - "${PORT}"
     ports:
-      - "8081:8080"                    # Host 8081 -> Container 8080
-    restart: always
+      - "8081:${PORT}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT}/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   app_green:
-    image: "${GREEN_IMAGE}"            # e.g., ghcr.io/hngprojects/hngx-bluegreen-green:latest
+    image: "${GREEN_IMAGE}"
     container_name: app_green
     environment:
-      - PORT=${PORT:-8080}
+      - PORT=${PORT}
       - RELEASE_ID=${RELEASE_ID_GREEN}
+      - APP_POOL=green
+    expose:
+      - "${PORT}"
     ports:
-      - "8082:8080"                    # Host 8082 -> Container 8080
-    restart: always
+      - "8082:${PORT}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT}/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   nginx:
     image: nginx:stable-alpine
@@ -26,18 +44,14 @@ services:
       - app_blue
       - app_green
     ports:
-      - "8080:80"                      # Public entrypoint
+      - "${PORT}:80"
     environment:
       - ACTIVE_POOL=${ACTIVE_POOL}
-      - UPSTREAM_BLUE=127.0.0.1:8081
-      - UPSTREAM_GREEN=127.0.0.1:8082
+      - UPSTREAM_BLUE=app_blue:${PORT}
+      - UPSTREAM_GREEN=app_green:${PORT}
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       - ./nginx/docker-entrypoint.sh:/docker-entrypoint.sh:ro
-    entrypoint: ["/docker-entrypoint.sh"]
-    restart: always
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    command: ["nginx", "-g", "daemon off;"]
+    restart: unless-stopped
